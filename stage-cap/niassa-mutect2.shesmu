@@ -1,0 +1,232 @@
+Version 1;
+Input cerberus_fp;
+Import niassa::gsi::*;
+
+# temporary function to help transition all CAP projects to by tumor group olives
+Function is_by_tumor_group_project(string project)
+  # remove project from this list to transition existing project from by donor to by tumor group
+  If project In ["CTAT","TGL52","VAL1"] Then
+    False
+  Else If project ~ /GSICAPBENCH\d{2}\d{2}\d{2}/ Then
+    Begin
+      d = project =~ /GSI(?:CAP)?BENCH(\d{2})(\d{2})(\d{2})/;
+      # GSICAPBENCH before 2020-11-16 used by donor grouping
+      Return (`std::date::utc_date(std::integer::parse("20{d[0]?}")?, std::integer::parse(d[1]?)?, std::integer::parse(d[2]?)?)? >= Date 2020-11-16` Default True);
+    End
+  Else
+    # any new project should use by tumor group logic
+    True;
+
+# Provides chromosome sizes for calling mutations genome-wide
+Function get_whole_genome_intervals(string reference)
+  Switch reference
+    When "hg19" Then
+      `"/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19.chrom.sizes.bed"`
+    When "hg38" Then
+      `"/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38.chrom.sizes.bed"`
+    Else
+      ``;
+
+Define select()
+  Label "Is Niassa data?"
+  Where workflow_engine == NIASSA
+  # temporary filter while CAP projects are transitioned to by tumor group olives
+  Where !is_by_tumor_group_project(project)
+
+  Where
+      metatype In ["application/bam", "application/bam-index"]
+      && workflow In ["bamMergePreprocessing", "BamMergePreprocessing", "BamFilterMergeCollapse"]
+      && olive::common::is_project_active(project)
+      && olive::common::is_clinical_project(project)
+      && (olive::common::get_project_info(project).cancer_pipeline.fulldepth_analysis.mutect2_pipeline != ``)
+      && library_design In ["EX", "WG", "TS"]
+      && instrument_model != "Illumina MiSeq"
+      && timestamp >= Date 2020-05-04;
+
+Function get_reference_files(string reference)
+  Switch reference
+  	When "hg19" Then
+  	  `{
+    		refDict = "$HG19_ROOT/hg19_random.dict",
+    		refFai = "$HG19_ROOT/hg19_random.fa.fai",
+    		refFasta = "$HG19_ROOT/hg19_random.fa",
+    		modules = "gatk/4.1.7.0 hg19/p13 samtools/1.9"
+  	  }`
+  	When "hg38" Then
+  	  `{
+    		refDict = "$HG38_ROOT/hg38_random.dict",
+    		refFai = "$HG38_ROOT/hg38_random.fa.fai",
+    		refFasta = "$HG38_ROOT/hg38_random.fa",
+    		modules = "gatk/4.1.7.0 hg38/p12 samtools/1.9"
+  	  }`
+  	Else
+  	``;
+
+Olive
+  Tag niassa
+  Tag tumoronly
+
+  select()
+  Where (olive::common::get_project_info(project).cancer_pipeline.fulldepth_analysis.mutect2_pipeline.enable_tumor_only == `True`)
+
+  Group By workflow_run_accession, project, @merged_library, reference = olive::common::extract_reference(workflow_run_attributes), targeted_resequencing
+  Into
+    timestamp = Max timestamp,
+    bam = Where metatype == "application/bam" && tissue_type != "R" Univalued path,
+    bam_index = Where metatype == "application/bam-index" && tissue_type != "R" Univalued path,
+    inputs = Where metatype In ["application/bam", "application/bam-index"] List {accession = accession, lims = lims, signature = std::signature::sha1, stale = stale}
+  Pick Max timestamp By @merged_library, reference
+
+  Require {reference_info, refFiles, whole_genome_interval_file} = `{olive::common::get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?, get_whole_genome_intervals(reference?)?}`
+    OnReject
+      Alert
+        alertname = "NoReference",
+        severity = "pipeline",
+        environment = config::misc::environment,
+        workflow = "mutect2",
+        reference = reference Default "Missing",
+        library_design = library_design,
+        targeted_resequencing = targeted_resequencing,
+        project = project
+      For 30mins
+    Resume
+
+  Where reference_info.reference_name == "hg38" # TODO(amasella): remove once data is cleaned up
+  Run cap_mutect2_1_0_3_tumor_only
+  Tag "project:{project}"
+  Tag "merged_library:{@merged_library}"
+  Tag "reference:{reference_info.reference_name}"
+  With
+    wdl_inputs = {
+      mutect2 = {
+        tumorBam = bam,
+        tumorBai = bam_index,
+        intervalFile = `std::path::replace_home(std::string::to_path(whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
+        intervalsToParallelizeBy = reference_info.clinical_chromosomes,
+        runMutect2 = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta,
+          refFai = refFiles.refFai,
+          refDict = refFiles.refDict,
+          memory = 24,
+          threads = 16,
+          timeout = 168
+        },
+        mergeVCFs = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta
+        },
+        filter = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta,
+          refFai = refFiles.refFai,
+          refDict = refFiles.refDict
+        }
+      }
+    },
+    wdl_options = {
+      final_workflow_log_dir = config::misc::final_workflow_log_dir,
+      final_call_logs_dir = config::misc::final_call_logs_dir
+    },
+    cromwell_host = config::misc::cromwell_host,
+    inputs = inputs,
+    reference = reference_info.reference_name,
+    output_prefix = olive::common::get_project_output_prefix(project, table::output_for_project::get(project)),
+    major_olive_version = 0;
+
+Olive
+  Tag niassa
+  Tag tumornormal
+
+  select()
+
+  Group By workflow_run_accession, @merged_library, project, reference = olive::common::extract_reference(workflow_run_attributes), targeted_resequencing
+  Into
+    timestamp = Max timestamp,
+    is_tumor = All tissue_type != "R",
+    bam = Where metatype == "application/bam" Univalued path,
+    bamIndex = Where metatype == "application/bam-index" Univalued path,
+    inputs = Where metatype In ["application/bam", "application/bam-index"] List {accession = accession, lims = lims, signature = std::signature::sha1, stale = stale}
+
+  Pick Max timestamp By @merged_library, reference, project
+
+  # Get T/N pairs
+  Group By donor, project, reference
+  Using crosstab
+    partition = is_tumor
+  Into
+    tumor_bam = Where is_tumor Univalued bam,
+    tumor_bai = Where is_tumor Univalued bamIndex,
+    normal_bam = Where !is_tumor Univalued bam,
+    normal_bai = Where !is_tumor Univalued bamIndex,
+    inputs = Flatten inputs,
+    library_design = Univalued library_design,
+    targeted_resequencing = Univalued targeted_resequencing
+  Let
+    project,
+    inputs,
+    reference,
+    tumor_bam,
+    tumor_bai,
+    normal_bam,
+    normal_bai,
+    library_design,
+    targeted_resequencing
+
+  Require {reference_info, refFiles, whole_genome_interval_file} = `{olive::common::get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?, get_whole_genome_intervals(reference?)?}`
+   OnReject
+      Alert
+        alertname = "NoReference",
+        severity = "pipeline",
+        environment = config::misc::environment,
+        workflow = "mutect2",
+        reference = reference Default "Missing",
+        library_design = library_design,
+        targeted_resequencing = targeted_resequencing,
+        project = project
+      For 30mins
+    Resume
+
+  Where reference_info.reference_name == "hg38" # TODO(amasella): remove once data is cleaned up
+  Run cap_mutect2_1_0_3_matched
+  Tag "project:{project}"
+  Tag "reference:{reference_info.reference_name}"
+  With
+    wdl_inputs = {
+      mutect2 = {
+        tumorBam = tumor_bam,
+        tumorBai = tumor_bai,
+        normalBam = `normal_bam`,
+        normalBai = `normal_bai`,
+	intervalFile = `std::path::replace_home(std::string::to_path(whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
+        intervalsToParallelizeBy = reference_info.clinical_chromosomes,
+        runMutect2 = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta,
+          refFai = refFiles.refFai,
+          refDict = refFiles.refDict,
+          memory = 24,
+          threads = 16,
+          timeout = 168
+        },
+        mergeVCFs = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta
+        },
+        filter = {
+          modules = refFiles.modules,
+          refFasta = refFiles.refFasta,
+          refFai = refFiles.refFai,
+          refDict = refFiles.refDict
+        }
+      }
+    },
+    wdl_options = {
+      final_workflow_log_dir = config::misc::final_workflow_log_dir,
+      final_call_logs_dir = config::misc::final_call_logs_dir
+    },
+    cromwell_host = config::misc::cromwell_host,
+    inputs = inputs,
+    reference = reference_info.reference_name,
+    output_prefix = olive::common::get_project_output_prefix(project, table::output_for_project::get(project)),
+    major_olive_version = 0;
