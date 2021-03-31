@@ -1,0 +1,72 @@
+{
+  "accession": 17580295,
+  "annotations": {
+    "mode": "tumor_only"
+  },
+  "fileMatchingPolicy": "EXACT",
+  "maxInFlight": 50,
+  "parameters": [
+    {
+      "iniName": "wdl_inputs",
+      "name": "wdl_inputs",
+      "required": true,
+      "type": {
+        "is": "wdl",
+        "parameters": {
+          "mutect2.filter.modules": "String",
+          "mutect2.filter.refDict": "String",
+          "mutect2.filter.refFai": "String",
+          "mutect2.filter.refFasta": "String",
+          "mutect2.intervalFile": "File?",
+          "mutect2.intervalsToParallelizeBy": "String?",
+          "mutect2.mergeVCFs.modules": "String",
+          "mutect2.mergeVCFs.refFasta": "String",
+          "mutect2.runMutect2.modules": "String",
+          "mutect2.runMutect2.refDict": "String",
+          "mutect2.runMutect2.refFai": "String",
+          "mutect2.runMutect2.refFasta": "String",
+          "mutect2.runMutect2.memory": "Int",
+          "mutect2.runMutect2.threads": "Int",
+          "mutect2.runMutect2.timeout": "Int",
+          "mutect2.tumorBai": "File",
+          "mutect2.tumorBam": "File"
+        }
+      }
+    },
+    {
+      "iniName": "wdl_options",
+      "name": "wdl_options",
+      "required": true,
+      "type": {
+        "is": "wdl",
+        "parameters": {
+          "final_workflow_log_dir": "String",
+          "final_call_logs_dir": "String"
+        }
+      }
+    },
+    {
+      "iniName": "cromwell_host",
+      "name": "cromwell_host",
+      "required": true,
+      "type": "string"
+    },
+    {
+      "iniName": "output_prefix",
+      "name": "output_prefix",
+      "required": true,
+      "type": "string"
+    }
+  ],
+  "previousAccessions": [
+    16800912,
+    5053505,
+    10726253,
+    15222898,
+    17369042
+  ],
+  "type": "FILES_SIGNED",
+  "userAnnotations": {
+    "reference": "s"
+  }
+}

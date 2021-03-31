@@ -2,7 +2,6 @@ Version 1;
 Input cerberus_fp;
 Import niassa::gsi::*;
 
-# temporary function to help transition all CAP projects to by tumor group olives
 Function is_by_tumor_group_project(string project)
   # remove project from this list to transition existing project from by donor to by tumor group
   If project In ["CTAT","TGL52","VAL1"] Then
@@ -17,15 +16,73 @@ Function is_by_tumor_group_project(string project)
     # any new project should use by tumor group logic
     True;
 
-# Provides chromosome sizes for calling mutations genome-wide
-Function get_whole_genome_intervals(string reference)
+Export Function get_reference_interval_info(string reference, string library_design, string targeted_resequencing)
   Switch reference
     When "hg19" Then
-      `"/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19.chrom.sizes.bed"`
+      Begin
+        chromosomes = If library_design In ["AS", "CH", "NN", "WG"]
+          Then `"chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX,chrY,chrM"`
+          Else intervals::default::get(library_design, targeted_resequencing, "chromosomes");
+        interval_file = intervals::default::get(library_design, If library_design In ["AS", "CH", "NN", "WG"] Then "" Else targeted_resequencing, "interval_file");
+        clinical_interval_file = intervals::tgl_mutect2::get(library_design, If library_design In ["AS", "CH", "NN", "WG"] Then "" Else targeted_resequencing, "interval_file") || interval_file;
+        clinical_chromosomes = intervals::tgl_mutect2::get(library_design, If library_design In ["AS", "CH", "NN", "WG"] Then "" Else targeted_resequencing, "chromosomes") || chromosomes;
+        Return `{
+          reference_name = "hg19",
+          chromosomes = chromosomes?,
+          clinical_chromosomes = clinical_chromosomes,
+          interval_file = interval_file?,
+          clinical_interval_file = clinical_interval_file?,
+          whole_genome_interval_file = "/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19.chrom.sizes.bed",
+          reference_file = "/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19_random.fa",
+          reference_index_file = "/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19_random.fa.fai",
+          reference_dict_file = "/.mounts/labs/gsi/modulator/sw/data/hg19-p13/hg19_random.dict",
+          module = "hg19/p13"
+        }`;
+      End
     When "hg38" Then
-      `"/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38.chrom.sizes.bed"`
-    Else
-      ``;
+      Begin
+        chromosomes = If library_design In ["AS", "CH", "NN", "WG"]
+          Then `"chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX,chrY,chrM"`
+          Else intervals::hg38_p12::get(library_design, targeted_resequencing, "chromosomes");
+        interval_file = intervals::hg38_p12::get(library_design, If library_design In ["AS", "CH", "NN", "WG"] Then "" Else targeted_resequencing, "interval_file");
+        clinical_interval_file = intervals::cap_hg38_mutect2::get(library_design, If library_design In ["AS", "CH", "NN", "WG"] Then "" Else targeted_resequencing, "interval_file") || interval_file;
+        clinical_chromosomes = If library_design In ["AS", "CH", "NN", "WG"]
+          Then `"chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX,chrY"`
+          Else intervals::cap_hg38_mutect2::get(library_design, targeted_resequencing, "chromosomes");
+        Return `{
+          reference_name = "hg38",
+          chromosomes = chromosomes?,
+          clinical_chromosomes = clinical_chromosomes,
+          interval_file = interval_file?,
+          clinical_interval_file = clinical_interval_file?,
+          whole_genome_interval_file = "/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38.chrom.sizes.bed",
+          reference_file = "/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38_random.fa",
+          reference_index_file = "/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38_random.fa.fai",
+          reference_dict_file = "/.mounts/labs/gsi/modulator/sw/data/hg38-p12/hg38_random.dict",
+          module = "hg38/p12"
+        }`;
+      End
+    When "mm10" Then
+      Begin
+        chromosomes = If library_design In ["WG", "CH"]
+          Then `"chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chrX,chrY,chrM"`
+          Else intervals::mm10_p6::get(library_design, targeted_resequencing, "chromosomes");
+        interval_file = intervals::mm10_p6::get(library_design, If library_design In ["WG", "CH"] Then "" Else targeted_resequencing, "interval_file");
+        Return `{
+          reference_name = "mm10",
+          chromosomes = chromosomes?,
+          clinical_chromosomes = chromosomes,
+          interval_file = interval_file?,
+          clinical_interval_file = interval_file?,
+          whole_genome_interval_file = "/.mounts/labs/gsi/modulator/sw/data/mm10-p6/mm10.chrom.sizes.bed",
+          reference_file = "/.mounts/labs/gsi/modulator/sw/data/mm10-p6/mm10.fa",
+          reference_index_file = "/.mounts/labs/gsi/modulator/sw/data/mm10-p6/mm10.fa.fai",
+          reference_dict_file = "/.mounts/labs/gsi/modulator/sw/data/mm10-p6/mm10.dict",
+          module = "mm10/p6"
+        }`;
+      End
+    Else ``;
+
 
 Define select()
   Label "Is Niassa data?"
@@ -77,7 +134,7 @@ Olive
     inputs = Where metatype In ["application/bam", "application/bam-index"] List {accession = accession, lims = lims, signature = std::signature::sha1, stale = stale}
   Pick Max timestamp By @merged_library, reference
 
-  Require {reference_info, refFiles, whole_genome_interval_file} = `{olive::common::get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?, get_whole_genome_intervals(reference?)?}`
+  Require {reference_info, refFiles} = `{get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?}`
     OnReject
       Alert
         alertname = "NoReference",
@@ -101,7 +158,7 @@ Olive
       mutect2 = {
         tumorBam = bam,
         tumorBai = bam_index,
-        intervalFile = `std::path::replace_home(std::string::to_path(whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
+        intervalFile = `std::path::replace_home(std::string::to_path(reference_info.whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
         intervalsToParallelizeBy = reference_info.clinical_chromosomes,
         runMutect2 = {
           modules = refFiles.modules,
@@ -173,7 +230,7 @@ Olive
     library_design,
     targeted_resequencing
 
-  Require {reference_info, refFiles, whole_genome_interval_file} = `{olive::common::get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?, get_whole_genome_intervals(reference?)?}`
+  Require {reference_info, refFiles} = `{get_reference_interval_info(reference?, library_design, targeted_resequencing)?, get_reference_files(reference?)?}`
    OnReject
       Alert
         alertname = "NoReference",
@@ -198,7 +255,7 @@ Olive
         tumorBai = tumor_bai,
         normalBam = `normal_bam`,
         normalBai = `normal_bai`,
-	intervalFile = `std::path::replace_home(std::string::to_path(whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
+	intervalFile = `std::path::replace_home(std::string::to_path(reference_info.whole_genome_interval_file), std::string::to_path(config::misc::cromwell_home_dir))`,
         intervalsToParallelizeBy = reference_info.clinical_chromosomes,
         runMutect2 = {
           modules = refFiles.modules,
