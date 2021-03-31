@@ -4,7 +4,7 @@
     "mode": "matched"
   },
   "fileMatchingPolicy": "EXACT",
-  "maxInFlight": 50,
+  "maxInFlight": 0,
   "parameters": [
     {
       "iniName": "wdl_inputs",

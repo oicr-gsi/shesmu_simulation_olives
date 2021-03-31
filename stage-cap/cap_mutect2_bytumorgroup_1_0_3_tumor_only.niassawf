@@ -4,7 +4,7 @@
     "mode": "tumor_only"
   },
   "fileMatchingPolicy": "EXACT",
-  "maxInFlight": 50,
+  "maxInFlight": 0,
   "parameters": [
     {
       "iniName": "wdl_inputs",
